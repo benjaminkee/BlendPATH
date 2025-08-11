@@ -2,8 +2,8 @@
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = ["BlendPATH"]
+[tool.setuptools.packages.find]
+exclude = ["user_manual"]
 
 [project]
 name = 'BlendPATH_v2'
