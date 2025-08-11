@@ -363,7 +363,7 @@ def calc_lcot(
 
     sol = pf.solve_price()
 
-    price_breakdown = pf.get_cost_breakdown(sorted=False)
+    price_breakdown = pf.get_cost_breakdown()
     price_breakdown_dict = dict(
         zip(price_breakdown["Name"].values, price_breakdown["NPV"].values)
     )
