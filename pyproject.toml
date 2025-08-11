@@ -2,6 +2,9 @@
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+packages = ['BlendPATH']
+
 [project]
 name = 'BlendPATH_v2'
 description='Blending Pipeline Analysis Tool for Hydrogen v2'
