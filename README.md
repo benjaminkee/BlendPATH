@@ -7,11 +7,15 @@
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
-Welcome to the Blending Pipeline Analysis Tool for Hydrogen (BlendPATH) [SWR-24-10](https://www.osti.gov/doecode/biblio/117221). This is a Python-based tool. The instructions below assumes that the user possesses background knowledge in Python and has Anaconda installed. Below is a quick-start guide:
+Welcome to the Blending Pipeline Analysis Tool for Hydrogen (BlendPATH) [SWR-24-10](https://www.osti.gov/doecode/biblio/117221). 
+
+# User Manual
+Please refer to the [BlendPATH User Manual](https://docs.nrel.gov/docs/fy25osti/87790.pdf) for in-depth documentation. The file is also available in the repository linked [here](user_manual/BlendPATH_User_Manual.pdf).
 
 # Installation
-The BlendPATH repository can by cloned to your local computer using:
+This is a Python-based tool. The instructions below assumes that the user possesses background knowledge in Python and has Anaconda installed. Below is a quick-start guide:
 
+The BlendPATH repository can by cloned to your local computer using:
 ```console
 git clone https://github.com/NREL/BlendPATH.git
 ```
