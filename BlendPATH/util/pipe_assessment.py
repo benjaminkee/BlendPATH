@@ -34,10 +34,17 @@ PIPE_STR = {
 #     "X65": {"SMYS": 450, "SMTS": 535},
 #     "X70": {"SMYS": 485, "SMTS": 570},
 # }
+_POLYMER_CODES = ["PE", "PA"]
 _STEEL_GRADE_CODES = ["X"]
 
 
 _DESIGN_OPTIONS = Literal["a", "b", "no fracture criterion", "nfc"]
+
+
+@dataclass
+class Design_options:
+    steel: float
+    polymer: float
 
 
 @dataclass
@@ -51,7 +58,7 @@ def get_pipe_grades() -> list:
     """
     Get all available pipe grades
     """
-    return [val for val in PIPE_STR.keys() if val not in ["B", "X46"]]
+    return [val for val in PIPE_STR if val not in ["B", "X46"]]
 
 
 def get_SMYS_SMTS(grade: str) -> tuple:
@@ -295,7 +302,20 @@ def get_pipe_volume(diam_o_m: float, diam_i_m: float, length_m: float) -> float:
     return np.pi / 4 * (diam_o_m**2 - diam_i_m**2) * length_m
 
 
-def check_design_option(design_option: str | float):
+def check_design_option(design_option: str | float | Design_options) -> Design_options:
+
+    if isinstance(design_option, Design_options):
+        return Design_options(
+            steel=convert_design_option_to_float(design_option.steel),
+            polymer=convert_design_option_to_float(design_option.polymer),
+        )
+    return Design_options(
+        steel=convert_design_option_to_float(design_option),
+        polymer=convert_design_option_to_float(design_option),
+    )
+
+
+def convert_design_option_to_float(design_option: str | float):
     # Cast to string
     design_option_formatted = str(design_option).lower()
     # If not in preselected options, then filter for numerical value

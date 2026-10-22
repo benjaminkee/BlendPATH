@@ -11,9 +11,33 @@ from importlib_resources import files
 import BlendPATH.costing.costing as bp_cost
 import BlendPATH.Global as gl
 from BlendPATH import BlendPATH_scenario
+from BlendPATH.costing.distribution_network_nonpipe_costs.meter_station_assembly_costs import (
+    DEFAULT_MSA_BLEND_LIMIT,
+)
+from BlendPATH.costing.distribution_network_nonpipe_costs.odorization import (
+    DEFAULT_ODORANT_COST,
+)
+from BlendPATH.costing.distribution_network_nonpipe_costs.regulator_costs import (
+    DEFAULT_BLEND_LIMIT,
+    DEFAULT_REG_MAINTENANCE_FRACTION,
+    DEFAULT_REG_REFURBISHENT_FRACTION,
+    SUPPLY_NODE_REGULATOR_COST,
+)
+from BlendPATH.costing.distribution_network_nonpipe_costs.valves import (
+    DEFAULT_VALVE_COST,
+    DEFAULT_VALVE_DENSITY,
+    DEFAULT_VALVE_REPLACEMENT_FRACTION,
+    DEFAULT_VALVE_REPLACEMENT_LIMIT,
+)
 from BlendPATH.costing.pipe_costs.anl_pipe_correlations import ANL_COEFS
+from BlendPATH.costing.pipe_costs.polymer_pipe_costs import polymer_pipe_fxns
 from BlendPATH.emissions.emissions_params import EmissionsParams
-from BlendPATH.util.pipe_assessment import _DESIGN_OPTIONS, ASME_consts
+from BlendPATH.util.pipe_assessment import (
+    _DESIGN_OPTIONS,
+    ASME_consts,
+    Design_options,
+    check_design_option,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +52,7 @@ class Design_params:
     new_comp_eta_s_elec: float | None = None
     new_comp_eta_driver: float | None = None
     new_comp_eta_driver_elec: float | None = None
+    max_dist_velocity: float | None = None
     asme: ASME_consts = field(default_factory=lambda: ASME_consts())
 
 
@@ -42,7 +67,8 @@ class Network_params:
 @dataclass
 class Scenario_type:
     TRANSMISSION = "transmission"
-    options = [TRANSMISSION]
+    DISTRIBUTION = "distribution"
+    options = [TRANSMISSION, DISTRIBUTION]
 
 
 # @dataclass
@@ -57,7 +83,8 @@ class Scenario_type:
 class ScenarioValues:
     max_pressure_pa: float
     min_pressure_pa: float
-    default_design_option: str | float
+    default_design_option: Design_options
+    new_pipe_design_option: Design_options
     c_relax: float
 
 
@@ -66,10 +93,25 @@ SCENARIO_VALUES = {
     Scenario_type.TRANSMISSION: ScenarioValues(
         max_pressure_pa=200 * gl.BAR2PA,
         min_pressure_pa=20 * gl.BAR2PA,
-        default_design_option="b",
+        default_design_option=Design_options(steel="nfc", polymer=0.32),
+        new_pipe_design_option=Design_options(steel="b", polymer=0.32),
         c_relax=1.5,
-    )
+    ),
+    Scenario_type.DISTRIBUTION: ScenarioValues(
+        max_pressure_pa=3 * gl.BAR2PA,
+        min_pressure_pa=0.01 * gl.BAR2PA,
+        default_design_option=Design_options(steel=0.4, polymer=0.32),
+        new_pipe_design_option=Design_options(steel=0.4, polymer=0.32),
+        c_relax=2.0,
+    ),
 }
+
+
+def process_default_inputs_polymer_cost_type(value: Any) -> Any:
+    value = value.lower()
+    if value not in polymer_pipe_fxns:
+        raise ValueError(f"{value} is not a valid polymer cost type")
+    return value
 
 
 def process_default_inputs_scenario_type(value: Any) -> Any:
@@ -125,6 +167,8 @@ def process_default_inputs_regions(value: Any) -> Any:
 
 def process_default_inputs_design_option(value: Any) -> Any:
     # determine if value is numeric or not
+    if value is None:
+        return None
     is_float = False
     try:
         value = float(value)
@@ -193,7 +237,7 @@ def process_default_inputs_cast_float(value: Any) -> Any:
         value (Any): Input value coming from file.
 
     Returns:
-        Any: Output value that might be a float if possible
+        Output value that might be a float if possible.
     """
     try:
         return float(value)
@@ -279,11 +323,11 @@ _SCENARIO_INPUTS = {
     ),
     "design_option": Scenario_Input(
         name="_design_option",
-        default_val="b",
+        default_val=None,
         formatting=[process_default_inputs_design_option],
     ),
     "ng_price": Scenario_Input(name="ng_price", default_val=7.39, subcategory=True),
-    "h2_price": Scenario_Input(name="h2_price", default_val=4.40756, subcategory=True),
+    "h2_price": Scenario_Input(name="h2_price", default_val=3, subcategory=True),
     "elec_price": Scenario_Input(name="elec_price", default_val=0.07, subcategory=True),
     "region": Scenario_Input(
         name="region",
@@ -433,6 +477,15 @@ _SCENARIO_INPUTS = {
             process_default_inputs_scenario_type,
         ],
     ),
+    "polymer_cost_type": Scenario_Input(
+        name="polymer_cost_type",
+        default_val="socal",
+        subcategory=True,
+        formatting=[process_default_inputs_polymer_cost_type],
+    ),
+    "max_velocity_distribution": Scenario_Input(
+        name="max_velocity_distribution", default_val=20, subcategory=True
+    ),
     # --- emissions inputs (new) ---
     "EF_NG_COMB_gCO2_per_MJ": Scenario_Input(
         name="EF_NG_COMB_gCO2_per_MJ",
@@ -485,6 +538,90 @@ _SCENARIO_INPUTS = {
             process_default_inputs_check_truth,
         ],
     ),
+    "odorant_cost": Scenario_Input(
+        name="odorant_cost",
+        default_val=DEFAULT_ODORANT_COST,
+        subcategory=True,
+        formatting=[process_default_inputs_cast_float],
+    ),
+    "supply_regulator_cost": Scenario_Input(
+        name="supply_regulator_cost",
+        default_val=SUPPLY_NODE_REGULATOR_COST,
+        subcategory=True,
+        formatting=[process_default_inputs_cast_float],
+    ),
+    "regulator_blend_limit": Scenario_Input(
+        name="regulator_blend_limit",
+        default_val=DEFAULT_BLEND_LIMIT,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_outside_bounds,
+        ],
+    ),
+    "msa_blend_limit": Scenario_Input(
+        name="msa_blend_limit",
+        default_val=DEFAULT_MSA_BLEND_LIMIT,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_outside_bounds,
+        ],
+    ),
+    "valve_blend_limit": Scenario_Input(
+        name="valve_blend_limit",
+        default_val=DEFAULT_VALVE_REPLACEMENT_LIMIT,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_outside_bounds,
+        ],
+    ),
+    "valve_cost_distribution": Scenario_Input(
+        name="valve_cost_distribution",
+        default_val=DEFAULT_VALVE_COST,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_lt_zero,
+        ],
+    ),
+    "valve_density": Scenario_Input(
+        name="valve_density",
+        default_val=DEFAULT_VALVE_DENSITY,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_le_zero,
+        ],
+    ),
+    "valve_replacement_fraction": Scenario_Input(
+        name="valve_replacement_fraction",
+        default_val=DEFAULT_VALVE_REPLACEMENT_FRACTION,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_lt_zero,
+        ],
+    ),
+    "regulator_maintenance_fraction": Scenario_Input(
+        name="regulator_maintenance_fraction",
+        default_val=DEFAULT_REG_MAINTENANCE_FRACTION,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_lt_zero,
+        ],
+    ),
+    "regulator_refurbishment_fraction": Scenario_Input(
+        name="regulator_refurbishment_fraction",
+        default_val=DEFAULT_REG_REFURBISHENT_FRACTION,
+        subcategory=True,
+        formatting=[
+            process_default_inputs_cast_float,
+            process_default_inputs_raise_lt_zero,
+        ],
+    ),
 }
 
 
@@ -504,6 +641,14 @@ def process_default_inputs(
     temp_inputs = get_local_kwargs_overrides(
         intialization_inputs=intialization_inputs, temp_inputs=temp_inputs
     )
+
+    # design option formatting
+    if temp_inputs["design_option"] is None:
+        temp_inputs["design_option"] = SCENARIO_VALUES[
+            temp_inputs["scenario_type"]
+        ].default_design_option
+    else:
+        temp_inputs["design_option"] = check_design_option(temp_inputs["design_option"])
 
     # assign to scenario instance and separate out grouped params
     costing_params, design_params, network_params = assign_inputs(
@@ -529,6 +674,7 @@ def assign_inputs(
         logger.debug(
             f"Setting parameter: {var}; using variable: {value.name}; to value: {temp_inputs[var]}"
         )
+
     # Assign subcategories
     costing = bp_cost.Costing_params(
         h2_price=temp_inputs["h2_price"],
@@ -542,6 +688,19 @@ def assign_inputs(
         pipe_markup=temp_inputs["pipe_markup"],
         compressor_markup=temp_inputs["compressor_markup"],
         financial_overrides=temp_inputs["financial_overrides"],
+        polymer_cost_type=temp_inputs["polymer_cost_type"],
+        odorant_cost=temp_inputs["odorant_cost"],
+        supply_regulator_cost=temp_inputs["supply_regulator_cost"],
+        regulator_blend_limit=temp_inputs["regulator_blend_limit"],
+        msa_blend_limit=temp_inputs["msa_blend_limit"],
+        valve_blend_limit=temp_inputs["valve_blend_limit"],
+        valve_cost_distribution=temp_inputs["valve_cost_distribution"],
+        valve_density=temp_inputs["valve_density"],
+        valve_replacement_fraction=temp_inputs["valve_replacement_fraction"],
+        regulator_maintenance_fraction=temp_inputs["regulator_maintenance_fraction"],
+        regulator_refurbishment_fraction=temp_inputs[
+            "regulator_refurbishment_fraction"
+        ],
     )
     design = Design_params(
         final_outlet_pressure_mpa_g=temp_inputs["final_outlet_pressure_mpa_g"],
@@ -552,6 +711,7 @@ def assign_inputs(
         new_comp_eta_s_elec=temp_inputs["new_comp_eta_s_elec"],
         new_comp_eta_driver=temp_inputs["new_comp_eta_driver"],
         new_comp_eta_driver_elec=temp_inputs["new_comp_eta_driver_elec"],
+        max_dist_velocity=temp_inputs["max_velocity_distribution"],
         asme=ASME_consts(
             location_class=int(temp_inputs["location_class"]),
             T_rating=temp_inputs["T_rating"],
@@ -589,6 +749,7 @@ def get_default_file_values(
     default_inputs_filepath = f"{casestudy_name}/default_inputs.csv"
     if not os.path.exists(default_inputs_filepath):
         return temp_inputs
+
     # Open file
     with open(default_inputs_filepath, newline="") as csvfile:
         # Skip header
@@ -608,6 +769,7 @@ def get_default_file_values(
                 raise ValueError(f"{row[0]} is not a valid input file parameter")
             # Perform any processing
             temp_inputs[row[0]] = process_inputs_value(row=row)
+
     return temp_inputs
 
 
@@ -625,13 +787,13 @@ def get_local_kwargs_overrides(
 
 
 def process_inputs_value(row: list[str]) -> Any:
-    """Clean up CSV default inputs file
+    """Clean up CSV default inputs file.
 
     Args:
-        row (list[str]): CSV row from csv_reader
+        row: CSV row from csv_reader.
 
     Returns:
-        Any: Formatted value
+        Formatted value.
     """
     parameter = row[0]
     val = row[1]
@@ -695,6 +857,13 @@ OVERRIDES_FILES = {
         processing=bp_cost.get_compressor_cost_file,
         default_file=None,
     ),
+    "inline_regulator_cost": Overrides_files(
+        override_file="inline_regulator_cost.csv",
+        processing=bp_cost.inline_regulator_costs_file,
+        default_file=files(
+            "BlendPATH.costing.distribution_network_nonpipe_costs"
+        ).joinpath("inline_regulator_cost.csv"),
+    ),
 }
 
 
@@ -715,4 +884,5 @@ def financial_overrides_files(
             setattr(costing_params, override_attr, override.processing(file))
         elif override.default_file is None:
             setattr(costing_params, override_attr, {})
+
     return costing_params
